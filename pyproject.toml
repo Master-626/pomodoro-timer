@@ -1,0 +1,45 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "pomodoro-timer"
+version = "0.1.0"
+description = "A Pomodoro technique timer with productivity tracking and statistics"
+readme = "README.md"
+requires-python = ">=3.8"
+license = { text = "MIT" }
+authors = [
+    { name = "Xu Jiaqi", email = "jiaqixu12138@gmail.com" }
+]
+keywords = ["pomodoro", "timer", "productivity", "focus", "cli"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Topic :: Utilities",
+]
+dependencies = [
+    "click>=8.0.0",
+    "rich>=13.0.0",
+]
+
+[project.scripts]
+pomodoro = "pomodoro_timer.cli:main"
+pomo = "pomodoro_timer.cli:main"
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/Master-626/pomodoro-timer"
+Repository = "https://github.com/Master-626/pomodoro-timer"
+Issue-Tracker = "https://github.com/Master-626/pomodoro-timer/issues"
