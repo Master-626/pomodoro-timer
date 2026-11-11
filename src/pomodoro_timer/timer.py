@@ -11,9 +11,15 @@ def countdown_timer(
     on_tick: Optional[Callable[[int], None]] = None,
     on_complete: Optional[Callable[[], None]] = None,
 ):
-    """Run a countdown timer."""
-    remaining = seconds
+    """Run a countdown timer.
 
+    ``on_tick`` receives the remaining seconds before each one-second wait,
+    from ``seconds`` down to 1. A zero-length countdown completes immediately.
+    """
+    if seconds < 0:
+        raise ValueError("seconds must be non-negative")
+
+    remaining = seconds
     while remaining > 0:
         if on_tick:
             on_tick(remaining)
@@ -27,7 +33,7 @@ def countdown_timer(
 
 
 def format_time(seconds: int) -> str:
-    """Format seconds into MM:SS format."""
-    minutes = seconds // 60
-    secs = seconds % 60
-    return f"{minutes:02d}:{secs:02d}"
+    """Format seconds as MM:SS. A negative duration keeps a leading minus."""
+    sign = "-" if seconds < 0 else ""
+    minutes, secs = divmod(abs(seconds), 60)
+    return f"{sign}{minutes:02d}:{secs:02d}"
