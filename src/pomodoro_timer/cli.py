@@ -4,18 +4,52 @@ CLI interface for pomodoro-timer.
 
 import click
 from rich.console import Console
-from rich.table import Table
 from rich.panel import Panel
-from rich.progress import Progress, BarColumn, TimeRemainingColumn
+from rich.progress import BarColumn, Progress, TimeRemainingColumn
+from rich.table import Table
 
-from .tracker import PomodoroTracker
-from .timer import countdown_timer, format_time
+from . import __version__
+from .timer import countdown_timer
+from .tracker import (
+    DEFAULT_FOCUS_MINUTES,
+    LONG_BREAK_MINUTES,
+    POMODOROS_PER_CYCLE,
+    SHORT_BREAK_MINUTES,
+    PomodoroTracker,
+)
 
 console = Console()
 
 
+def _run_countdown(total_seconds: int, description: str) -> None:
+    """Show a progress bar while ``countdown_timer`` runs."""
+    with Progress(
+        "[progress.description]{task.description}",
+        BarColumn(),
+        "[progress.percentage]{task.percentage:>3.0f}%",
+        TimeRemainingColumn(),
+        console=console,
+    ) as progress:
+        task = progress.add_task(description, total=total_seconds)
+
+        def on_tick(remaining: int) -> None:
+            progress.update(task, completed=total_seconds - remaining)
+
+        countdown_timer(total_seconds, on_tick=on_tick)
+        progress.update(task, completed=total_seconds)
+
+
+def _print_next_break(tracker: PomodoroTracker) -> None:
+    remaining = tracker.get_sessions_until_long_break()
+    if remaining == 0:
+        console.print("Next: long break (completed a 4-session cycle).")
+        return
+    noun = "session" if remaining == 1 else "sessions"
+    console.print(f"Next: short break ({remaining} focus {noun} until a long break).")
+
+
 @click.group()
-@click.version_option(version="0.1.0")
+@click.version_option(version=__version__)
 @click.pass_context
 def main(ctx):
     """Pomodoro Timer - Boost your productivity with the Pomodoro Technique."""
@@ -24,7 +58,14 @@ def main(ctx):
 
 
 @main.command()
-@click.option("--minutes", "-m", default=25, help="Focus duration in minutes")
+@click.option(
+    "--minutes",
+    "-m",
+    default=DEFAULT_FOCUS_MINUTES,
+    show_default=True,
+    type=click.IntRange(min=1),
+    help="Focus duration in minutes.",
+)
 @click.pass_context
 def focus(ctx, minutes):
     """Start a focus session."""
@@ -33,102 +74,106 @@ def focus(ctx, minutes):
     console.print(Panel.fit(
         f"[bold red]Focus Session[/bold red]\n\nDuration: {minutes} minutes\n\n"
         "Stay focused and avoid distractions!",
-        border_style="red"
+        border_style="red",
     ))
 
-    total_seconds = minutes * 60
+    _run_countdown(minutes * 60, "Focusing...")
 
-    # Run countdown
-    with Progress(
-        "[progress.description]{task.description}",
-        BarColumn(),
-        "[progress.percentage]{task.percentage:>3.0f}%",
-        TimeRemainingColumn(),
-        console=console,
-    ) as progress:
-        task = progress.add_task("Focusing...", total=total_seconds)
-
-        for i in range(total_seconds, 0, -1):
-            progress.update(task, completed=total_seconds - i)
-            time.sleep(1)
-
-    # Record the session
     session = tracker.start_focus_session(duration_minutes=minutes)
 
     console.print(f"\n✅ Focus session complete! Session #{session.id}")
     console.print(f"⏱️  Duration: {minutes} minutes")
-    console.print(f"🔥 Nice work! Take a break!")
+    console.print("🔥 Nice work! Take a break!")
+    _print_next_break(tracker)
 
 
-@main.command()
-@click.option("--type", "break_type", default="short",
-              type=click.Choice(["short", "long"]),
-              help="Break type (short=5min, long=15min)")
+# Named explicitly so Click 8.0 and 8.1 do not expose this as "break-cmd".
+@main.command(name="break")
+@click.option(
+    "--type",
+    "break_type",
+    default=None,
+    type=click.Choice(["short", "long"]),
+    help="Break length: short (5 minutes) or long (15 minutes). Defaults to short.",
+)
+@click.option(
+    "--auto",
+    is_flag=True,
+    help="Long break after every 4th focus session today; otherwise a short break.",
+)
 @click.pass_context
-def break_cmd(ctx, break_type):
+def break_cmd(ctx, break_type, auto):
     """Take a break."""
-    tracker = ctx.obj["tracker"]
+    if auto and break_type is not None:
+        raise click.UsageError("Use either --auto or --type, not both.")
 
-    duration = 5 if break_type == "short" else 15
+    tracker = ctx.obj["tracker"]
+    if auto:
+        break_type = tracker.get_recommended_break()
+    elif break_type is None:
+        break_type = "short"
+
+    duration = LONG_BREAK_MINUTES if break_type == "long" else SHORT_BREAK_MINUTES
 
     console.print(Panel.fit(
         f"[bold blue]{break_type.title()} Break[/bold blue]\n\nDuration: {duration} minutes\n\n"
         "Relax and recharge!",
-        border_style="blue"
+        border_style="blue",
     ))
 
-    total_seconds = duration * 60
-
-    with Progress(
-        "[progress.description]{task.description}",
-        BarColumn(),
-        "[progress.percentage]{task.percentage:>3.0f}%",
-        TimeRemainingColumn(),
-        console=console,
-    ) as progress:
-        task = progress.add_task("On break...", total=total_seconds)
-
-        for i in range(total_seconds, 0, -1):
-            progress.update(task, completed=total_seconds - i)
-            time.sleep(1)
-
+    _run_countdown(duration * 60, "On break...")
     tracker.start_break(break_type=break_type, duration_minutes=duration)
 
-    console.print(f"\n✅ Break over! Ready to focus again?")
+    console.print("\n✅ Break over! Ready to focus again?")
 
 
 @main.command()
-@click.option("--days", "-d", default=7, help="Number of days to show stats for")
+@click.option(
+    "--days",
+    "-d",
+    default=7,
+    show_default=True,
+    type=click.IntRange(min=1),
+    help="Number of days to show stats for.",
+)
 @click.pass_context
 def stats(ctx, days):
     """Show productivity statistics."""
     tracker = ctx.obj["tracker"]
-    stats = tracker.get_stats(days=days)
+    summary = tracker.get_stats(days=days)
     streak = tracker.get_current_streak()
+    remaining = tracker.get_sessions_until_long_break()
+    if remaining == 0:
+        done = POMODOROS_PER_CYCLE
+        next_break = "long"
+    else:
+        done = POMODOROS_PER_CYCLE - remaining
+        next_break = "short"
 
     console.print(Panel.fit(
         f"[bold cyan]Pomodoro Statistics[/bold cyan]\n\n"
         f"Period: Last {days} days\n\n"
-        f"Total Focus Sessions: {stats['total_focus_sessions']}\n"
-        f"Total Focus Time: {stats['total_focus_minutes']} minutes\n"
-        f"Average per Day: {stats['average_per_day']} sessions\n"
-        f"🔥 Current Streak: {streak} days",
-        border_style="cyan"
+        f"Total Focus Sessions: {summary['total_focus_sessions']}\n"
+        f"Total Focus Time: {summary['total_focus_minutes']} minutes\n"
+        f"Average per Day: {summary['average_per_day']} sessions\n"
+        f"🔥 Current Streak: {streak} days\n"
+        f"Cycle: {done}/{POMODOROS_PER_CYCLE}\n"
+        f"Next break: {next_break}",
+        border_style="cyan",
     ))
 
-    if stats["daily"]:
+    if summary["daily"]:
         console.print("\n📅 Daily Breakdown:")
         table = Table(show_header=True)
         table.add_column("Date", style="cyan")
         table.add_column("Sessions", style="green")
         table.add_column("Minutes", style="yellow")
 
-        for date, data in sorted(stats["daily"].items())[-7:]:
-            table.add_row(date, str(data["count"]), str(data["minutes"]))
+        for day, data in sorted(summary["daily"].items()):
+            table.add_row(day, str(data["count"]), str(data["minutes"]))
 
         console.print(table)
 
 
 if __name__ == "__main__":
-    import time
     main()
